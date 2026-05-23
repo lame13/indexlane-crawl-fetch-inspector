@@ -1,0 +1,5 @@
+Input URL,HTTP Status,Redirects,Final URL,Canonical URL,Meta Robots,X-Robots-Tag,Title,Meta Description,JSON-LD Count,Dev/Staging Residue,Response Time,Result,Details
+https://example.com/,200,0,https://example.com/,https://example.com/,"robots: index, follow",,Present,Present,2,Not found,184 ms,OK,No obvious crawl-facing issue found in the checked evidence.
+https://example.com/old-page/,200,3,https://example.com/new-page/,https://example.com/new-page/,,,Present,Missing,1,Not found,266 ms,Warning,Redirect chain detected.
+https://example.com/private/,200,0,https://example.com/private/,https://example.com/private/,"robots: noindex, nofollow",,Present,Missing,0,Not found,192 ms,Blocked,Robots directives include noindex or none.
+https://example.com/missing/,404,0,https://example.com/missing/,,,,Missing,Missing,0,Not found,118 ms,Error,HTTP status indicates a missing or gone URL.
