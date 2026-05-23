@@ -1,0 +1,114 @@
+name: WordPress activation smoke test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  activate:
+    name: WP ${{ matrix.wordpress }} / PHP ${{ matrix.php }} activation
+    runs-on: ubuntu-latest
+
+    services:
+      mariadb:
+        image: mariadb:10.6
+        env:
+          MARIADB_DATABASE: wordpress
+          MARIADB_USER: wordpress
+          MARIADB_PASSWORD: wordpress
+          MARIADB_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mariadb-admin ping -h localhost -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - php: '7.4'
+            wordpress: '6.0'
+          - php: '8.3'
+            wordpress: 'latest'
+          - php: '8.4'
+            wordpress: 'latest'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: mysqli, curl, dom, json, libxml, mbstring, zip
+          coverage: none
+          tools: none
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y default-mysql-client rsync
+          curl -L -o wp-cli.phar https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+          php wp-cli.phar --info
+          chmod +x wp-cli.phar
+          sudo mv wp-cli.phar /usr/local/bin/wp
+
+      - name: Wait for database
+        run: |
+          for i in {1..30}; do
+            if mysqladmin ping -h 127.0.0.1 -uwordpress -pwordpress --silent; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Database did not become ready" >&2
+          exit 1
+
+      - name: Install WordPress
+        run: |
+          mkdir -p /tmp/wp
+          wp_version='${{ matrix.wordpress }}'
+          wp_download_args=(--path=/tmp/wp --skip-content --force)
+          if [ "$wp_version" != "latest" ]; then
+            wp_download_args=(--version="$wp_version" "${wp_download_args[@]}")
+          fi
+          wp core download "${wp_download_args[@]}"
+          wp config create \
+            --path=/tmp/wp \
+            --dbname=wordpress \
+            --dbuser=wordpress \
+            --dbpass=wordpress \
+            --dbhost=127.0.0.1:3306 \
+            --skip-check
+          wp db reset --yes --path=/tmp/wp
+          wp core install \
+            --path=/tmp/wp \
+            --url=http://example.test \
+            --title="Plugin CI" \
+            --admin_user=admin \
+            --admin_password=password \
+            --admin_email=admin@example.test \
+            --skip-email
+
+      - name: Copy plugin into WordPress
+        run: |
+          mkdir -p /tmp/wp/wp-content/plugins/indexlane-crawl-fetch-inspector
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='vendor' \
+            ./ /tmp/wp/wp-content/plugins/indexlane-crawl-fetch-inspector/
+
+      - name: Activate plugin
+        run: |
+          wp plugin activate indexlane-crawl-fetch-inspector --path=/tmp/wp
+          wp plugin status indexlane-crawl-fetch-inspector --path=/tmp/wp
+          wp eval 'if ( ! class_exists( "IndexLane_Crawl_Fetch_Inspector" ) ) { fwrite( STDERR, "Plugin class not loaded.\n" ); exit( 1 ); }' --path=/tmp/wp

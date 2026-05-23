@@ -18,6 +18,10 @@ The plugin adds:
 
 Tested with WordPress 7.0 and PHP 8.4 during local verification.
 
+## CI
+
+GitHub Actions lint the plugin across PHP 7.4 through 8.4 and run WordPress activation smoke tests against WordPress 6.0 on PHP 7.4 plus the latest WordPress release on PHP 8.3 and 8.4.
+
 ## Data handling
 
 This tool checks same-site URLs selected or entered by the administrator. Results are generated for the current run and can be exported as CSV.
@@ -64,6 +68,9 @@ Not included:
 
 ```text
 indexlane-crawl-fetch-inspector/
+  .github/workflows/
+    php-compatibility.yml
+    wordpress-activation.yml
   indexlane-crawl-fetch-inspector.php
   readme.txt
   README.md

@@ -3,7 +3,7 @@
  * Plugin Name: IndexLane Crawl Fetch Inspector
  * Plugin URI: https://indexlane.dev/plugins/crawl-fetch-inspector/
  * Description: A small free WordPress diagnostic plugin for checking crawler-facing HTTP status, redirects, canonicals, robots directives, schema blocks, and basic HTML SEO signals.
- * Version: 0.1.0
+ * Version: 0.1.1
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: IndexLane
@@ -24,7 +24,7 @@ if ( ! class_exists( 'IndexLane_Crawl_Fetch_Inspector' ) ) {
 	 * Admin-only crawler-facing fetch diagnostics.
 	 */
 	final class IndexLane_Crawl_Fetch_Inspector {
-		const VERSION       = '0.1.0';
+		const VERSION       = '0.1.1';
 		const SLUG          = 'indexlane-crawl-fetch-inspector';
 		const NONCE_ACTION  = 'ilcfi_scan_request';
 		const NONCE_FIELD   = 'ilcfi_nonce';

@@ -4,7 +4,7 @@ Tags: crawl, redirects, canonical, robots, seo
 Requires at least: 6.0
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 0.1.0
+Stable tag: 0.1.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -73,6 +73,10 @@ No. The v0.1 build checks same-site WordPress URLs only. External manual URLs ar
 2. Results table with crawler-facing response evidence and conservative labels.
 
 == Changelog ==
+
+= 0.1.1 =
+* Added GitHub Actions PHP linting across PHP 7.4 through 8.4.
+* Added WordPress activation smoke tests for supported WordPress/PHP combinations.
 
 = 0.1.0 =
 * Initial release.

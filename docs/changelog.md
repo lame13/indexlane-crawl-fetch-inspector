@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+- Added GitHub Actions PHP linting across PHP 7.4 through 8.4.
+- Added WordPress activation smoke tests for supported WordPress/PHP combinations.
+- Bumped the plugin header, runtime version constant, and WordPress.org stable tag to 0.1.1 as a patch release.
+
 ## 0.1.0
 
 - Initial GitHub-ready scaffold.
