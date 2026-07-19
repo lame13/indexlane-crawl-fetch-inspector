@@ -3,7 +3,7 @@
  * Plugin Name: IndexLane Crawl Fetch Inspector
  * Plugin URI: https://indexlane.dev/plugins/crawl-fetch-inspector/
  * Description: A small free WordPress diagnostic plugin for checking crawler-facing HTTP status, redirects, canonicals, robots directives, schema blocks, and basic HTML SEO signals.
- * Version: 0.1.1
+ * Version: 0.1.2
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: IndexLane
@@ -24,12 +24,13 @@ if ( ! class_exists( 'IndexLane_Crawl_Fetch_Inspector' ) ) {
 	 * Admin-only crawler-facing fetch diagnostics.
 	 */
 	final class IndexLane_Crawl_Fetch_Inspector {
-		const VERSION       = '0.1.1';
-		const SLUG          = 'indexlane-crawl-fetch-inspector';
-		const NONCE_ACTION  = 'ilcfi_scan_request';
-		const NONCE_FIELD   = 'ilcfi_nonce';
-		const MAX_URLS      = 50;
-		const MAX_REDIRECTS = 5;
+		const VERSION            = '0.1.2';
+		const SLUG               = 'indexlane-crawl-fetch-inspector';
+		const NONCE_ACTION       = 'ilcfi_scan_request';
+		const NONCE_FIELD        = 'ilcfi_nonce';
+		const MAX_URLS           = 50;
+		const MAX_REDIRECTS      = 5;
+		const MAX_RESPONSE_BYTES = 2097152;
 
 		/**
 		 * Register hooks.
@@ -342,7 +343,7 @@ if ( ! class_exists( 'IndexLane_Crawl_Fetch_Inspector' ) ) {
 			$x_robots_tag   = $this->header_to_string( wp_remote_retrieve_header( $headers, 'x-robots-tag' ) );
 			$content_type   = strtolower( $this->header_to_string( wp_remote_retrieve_header( $headers, 'content-type' ) ) );
 			$is_html        = ( false !== strpos( $content_type, 'text/html' ) || false !== strpos( $content_type, 'application/xhtml+xml' ) || '' === $content_type );
-			$html_skipped   = ! empty( $fetch['redirect_left_site'] ) || ! empty( $fetch['redirect_loop'] ) || ! empty( $fetch['redirect_limit_reached'] );
+			$html_skipped   = ! $is_html || ! empty( $fetch['redirect_left_site'] ) || ! empty( $fetch['redirect_loop'] ) || ! empty( $fetch['redirect_limit_reached'] ) || ! empty( $fetch['body_truncated'] ) || ( $status >= 300 && $status < 400 );
 			$html_analysis  = ( $is_html && ! $html_skipped ) ? $this->analyze_html( $body, $final_url ) : $this->empty_html_analysis();
 			$classification = $this->classify_result( $status, $url, $final_url, $fetch, $html_analysis, $x_robots_tag, $is_html );
 
@@ -353,10 +354,18 @@ if ( ! class_exists( 'IndexLane_Crawl_Fetch_Inspector' ) ) {
 			$meta_description_state = $html_analysis['meta_description_present']
 				? __( 'Present', 'indexlane-crawl-fetch-inspector' )
 				: __( 'Missing', 'indexlane-crawl-fetch-inspector' );
+			$json_ld_state          = (string) $html_analysis['json_ld_count'];
+			$dev_residue_state      = empty( $html_analysis['dev_residue_terms'] ) ? __( 'Not found', 'indexlane-crawl-fetch-inspector' ) : sprintf(
+				/* translators: %s is a comma-separated list of detected dev/staging residue patterns. */
+				__( 'Found: %s', 'indexlane-crawl-fetch-inspector' ),
+				implode( ', ', $html_analysis['dev_residue_terms'] )
+			);
 
 			if ( $html_skipped ) {
 				$title_state            = __( 'Not checked', 'indexlane-crawl-fetch-inspector' );
 				$meta_description_state = __( 'Not checked', 'indexlane-crawl-fetch-inspector' );
+				$json_ld_state           = __( 'Not checked', 'indexlane-crawl-fetch-inspector' );
+				$dev_residue_state       = __( 'Not checked', 'indexlane-crawl-fetch-inspector' );
 			}
 
 			return array(
@@ -369,12 +378,8 @@ if ( ! class_exists( 'IndexLane_Crawl_Fetch_Inspector' ) ) {
 				'x_robots_tag'     => $x_robots_tag,
 				'title'            => $title_state,
 				'meta_description' => $meta_description_state,
-				'json_ld_count'    => (string) $html_analysis['json_ld_count'],
-				'dev_residue'      => empty( $html_analysis['dev_residue_terms'] ) ? __( 'Not found', 'indexlane-crawl-fetch-inspector' ) : sprintf(
-					/* translators: %s is a comma-separated list of detected dev/staging residue patterns. */
-					__( 'Found: %s', 'indexlane-crawl-fetch-inspector' ),
-					implode( ', ', $html_analysis['dev_residue_terms'] )
-				),
+				'json_ld_count'    => $json_ld_state,
+				'dev_residue'      => $dev_residue_state,
 				'response_time'    => $response_time ? sprintf(
 					/* translators: %d is response time in milliseconds. */
 					__( '%d ms', 'indexlane-crawl-fetch-inspector' ),
@@ -405,12 +410,12 @@ if ( ! class_exists( 'IndexLane_Crawl_Fetch_Inspector' ) ) {
 			for ( $step = 0; $step <= self::MAX_REDIRECTS; $step++ ) {
 				$seen[ $this->normalize_url_for_compare( $current_url ) ] = true;
 
-				$response = wp_remote_get(
+				$response = wp_safe_remote_get(
 					$current_url,
 					array(
 						'timeout'             => 15,
 						'redirection'         => 0,
-						'limit_response_size' => 2097152,
+						'limit_response_size' => self::MAX_RESPONSE_BYTES,
 						'user-agent'          => 'IndexLane Crawl Fetch Inspector/' . self::VERSION . '; ' . home_url( '/' ),
 						'headers'             => array(
 							'Accept' => 'text/html,application/xhtml+xml',
@@ -426,7 +431,16 @@ if ( ! class_exists( 'IndexLane_Crawl_Fetch_Inspector' ) ) {
 				$status        = (int) wp_remote_retrieve_response_code( $response );
 				$location      = $this->header_to_string( wp_remote_retrieve_header( $response, 'location' ) );
 
-				if ( $status < 300 || $status >= 400 || '' === $location ) {
+				if ( $status < 300 || $status >= 400 ) {
+					break;
+				}
+
+				if ( '' === $location ) {
+					$details[] = sprintf(
+						/* translators: %d is an HTTP status code. */
+						__( 'HTTP %d response did not provide a redirect target, so no final page was fetched.', 'indexlane-crawl-fetch-inspector' ),
+						$status
+					);
 					break;
 				}
 
@@ -475,7 +489,37 @@ if ( ! class_exists( 'IndexLane_Crawl_Fetch_Inspector' ) ) {
 				'redirect_left_site'     => $redirect_left_site,
 				'redirect_loop'          => $redirect_loop,
 				'redirect_limit_reached' => $redirect_limit_reached,
+				'body_truncated'          => $this->response_body_was_truncated( $last_response ),
 			);
+		}
+
+		/**
+		 * Whether the response body reached the request limit or is shorter than
+		 * an unencoded Content-Length header promised.
+		 *
+		 * @param array $response WordPress HTTP response.
+		 * @return bool
+		 */
+		private function response_body_was_truncated( array $response ) {
+			$body_length = strlen( (string) wp_remote_retrieve_body( $response ) );
+
+			if ( $body_length >= self::MAX_RESPONSE_BYTES ) {
+				return true;
+			}
+
+			$content_encoding = strtolower( $this->header_to_string( wp_remote_retrieve_header( $response, 'content-encoding' ) ) );
+
+			if ( '' !== $content_encoding && 'identity' !== $content_encoding ) {
+				return false;
+			}
+
+			$content_length = $this->header_to_string( wp_remote_retrieve_header( $response, 'content-length' ) );
+
+			if ( ! preg_match( '/^\d+$/', $content_length ) ) {
+				return false;
+			}
+
+			return (int) $content_length > $body_length;
 		}
 
 		/**
@@ -610,6 +654,10 @@ if ( ! class_exists( 'IndexLane_Crawl_Fetch_Inspector' ) ) {
 				$review_details[] = __( 'Redirect loop detected.', 'indexlane-crawl-fetch-inspector' );
 			}
 
+			if ( ! empty( $fetch['body_truncated'] ) ) {
+				$review_details[] = __( 'Response body reached the 2 MB safety limit or ended before its declared length; HTML signals were not checked.', 'indexlane-crawl-fetch-inspector' );
+			}
+
 			if ( ! $is_html ) {
 				$review_details[] = __( 'Response did not look like HTML.', 'indexlane-crawl-fetch-inspector' );
 			}
@@ -676,6 +724,26 @@ if ( ! class_exists( 'IndexLane_Crawl_Fetch_Inspector' ) ) {
 			}
 
 			if ( ! empty( $fetch['details'] ) || ! empty( $fetch['redirect_limit_reached'] ) || ! empty( $fetch['redirect_loop'] ) ) {
+				return array(
+					'label'  => __( 'Needs review', 'indexlane-crawl-fetch-inspector' ),
+					'detail' => implode( ' ', array_unique( $review_details ) ),
+				);
+			}
+
+			if ( $status >= 300 && $status < 400 ) {
+				$review_details[] = sprintf(
+					/* translators: %d is an HTTP status code. */
+					__( 'Crawler-facing fetch ended with HTTP %d instead of a final non-redirect response.', 'indexlane-crawl-fetch-inspector' ),
+					$status
+				);
+
+				return array(
+					'label'  => __( 'Needs review', 'indexlane-crawl-fetch-inspector' ),
+					'detail' => implode( ' ', array_unique( $review_details ) ),
+				);
+			}
+
+			if ( ! empty( $fetch['body_truncated'] ) ) {
 				return array(
 					'label'  => __( 'Needs review', 'indexlane-crawl-fetch-inspector' ),
 					'detail' => implode( ' ', array_unique( $review_details ) ),
@@ -945,13 +1013,13 @@ if ( ! class_exists( 'IndexLane_Crawl_Fetch_Inspector' ) ) {
 			$parts = wp_parse_url( $url );
 
 			if ( empty( $parts['scheme'] ) || empty( $parts['host'] ) ) {
-				return strtolower( untrailingslashit( $url ) );
+				return $url;
 			}
 
 			$scheme = strtolower( $parts['scheme'] );
-			$host   = strtolower( preg_replace( '/^www\./', '', $parts['host'] ) );
+			$host   = strtolower( $parts['host'] );
 			$port   = empty( $parts['port'] ) ? '' : ':' . (int) $parts['port'];
-			$path   = isset( $parts['path'] ) ? untrailingslashit( $parts['path'] ) : '';
+			$path   = isset( $parts['path'] ) ? $parts['path'] : '';
 			$query  = isset( $parts['query'] ) ? '?' . $parts['query'] : '';
 
 			if ( '' === $path ) {

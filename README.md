@@ -20,7 +20,7 @@ Tested with WordPress 7.0 and PHP 8.4 during local verification.
 
 ## CI
 
-GitHub Actions lint the plugin across PHP 7.4 through 8.4 and run WordPress activation smoke tests against WordPress 6.0 on PHP 7.4 plus the latest WordPress release on PHP 8.3 and 8.4.
+GitHub Actions lint the plugin and run redirect/response-boundary behavioral tests across PHP 7.4 through 8.4. Activation smoke tests run against WordPress 6.0 on PHP 7.4 plus the latest WordPress release on PHP 8.3 and 8.4.
 
 ## Data handling
 
@@ -48,6 +48,8 @@ Included:
 - Same-site WordPress URL checks only
 - External manual URLs skipped
 - Same-site redirects that leave the site are not followed
+- Safe WordPress HTTP requests with manual redirect tracking
+- Response bodies bounded to 2 MB, with incomplete evidence reported
 - Sanitized input and escaped output
 - CSV formula-injection protection
 - Read-only diagnostics
@@ -81,4 +83,6 @@ indexlane-crawl-fetch-inspector/
   docs/
     sample-report.csv
     changelog.md
+  tests/
+    behavioral.php
 ```

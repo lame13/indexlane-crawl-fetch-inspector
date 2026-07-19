@@ -4,7 +4,7 @@ Tags: crawl, redirects, canonical, robots, seo
 Requires at least: 6.0
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 0.1.1
+Stable tag: 0.1.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -73,6 +73,13 @@ No. The v0.1 build checks same-site WordPress URLs only. External manual URLs ar
 2. Results table with crawler-facing response evidence and conservative labels.
 
 == Changelog ==
+
+= 0.1.2 =
+* Fixed ordinary trailing-slash and canonical-host redirects being reported as loops.
+* Switched same-site requests to the WordPress safe HTTP API.
+* Made terminal 3xx responses require review instead of treating redirect-body HTML as final-page evidence.
+* Detects response bodies that reach the 2 MB limit or end before an unencoded declared length, and avoids claims from incomplete HTML.
+* Added behavioral tests for redirects, out-of-scope targets, and response truncation.
 
 = 0.1.1 =
 * Added GitHub Actions PHP linting across PHP 7.4 through 8.4.

@@ -31,3 +31,6 @@ jobs:
 
       - name: PHP lint
         run: find . -name '*.php' -not -path './vendor/*' -print0 | xargs -0 -n1 php -l
+
+      - name: Behavioral tests
+        run: php tests/behavioral.php
