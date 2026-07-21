@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+<head>
+  <title>Migration fixture</title>
+  <link rel="canonical" href="https://staging.example.net/product/">
+  <meta property="og:url" content="https://preview.example.net/product/">
+  <style>.hero { background-image: url("https://old.example/assets/hero.jpg"); }</style>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Product",
+        "@id": "https://old.example/#product",
+        "url": "https://old.example/product/"
+      },
+      {
+        "@type": ["Offer", "Thing"],
+        "@id": "https://old.example/#product",
+        "image": "https://old.example/assets/product.jpg"
+      }
+    ]
+  }
+  </script>
+  <script type="application/ld+json">{&quot;@type&quot;:&quot;WebPage&quot;}</script>
+</head>
+<body>
+  <p>Our staging plan is ordinary page copy and must not be flagged.</p>
+  <a href="https://old.example/support/">Support</a>
+  <img src="https://example.test/current.jpg" alt="">
+  <div style="background:url(https://dev.example.net/card.png)"></div>
+</body>
+</html>

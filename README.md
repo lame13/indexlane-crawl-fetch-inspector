@@ -1,88 +1,96 @@
 # IndexLane Crawl Fetch Inspector
 
-A small free WordPress diagnostic plugin for checking crawler-facing HTTP status, redirects, canonicals, robots directives, schema blocks, and basic HTML SEO signals.
+Inspect crawler-facing HTTP, indexability, sitemap, structured-data and migration evidence from inside WordPress.
+
+Project website: [indexlane.dev](https://indexlane.dev)
 
 ## What it does
 
-Check how important WordPress URLs respond at the crawler-facing HTML layer from inside wp-admin.
+The plugin adds **Tools → Crawl Fetch Inspector** for read-only, same-site diagnostics using three input modes:
 
-The plugin adds:
+- **Manual / recent WordPress URLs** — enter paths or URLs and optionally include recently modified posts, pages, or products.
+- **Sitemap sample** — expand a sitemap index within safety limits and sample across child sitemaps.
+- **Launch / migration check** — combine the home page, recent content, a distributed sitemap sample, and administrator-supplied old domains.
 
-- Tools -> Crawl Fetch Inspector admin screen
-- Manual URL input, one URL per line
-- Optional recent post, page, and product selectors
-- HTTP status, redirect count, final URL, canonical URL, robots signals, title and meta description presence, JSON-LD count, possible dev/staging residue, response time, and conservative result labels
-- CSV export
+Each page report is organized into:
 
-## Local test environment
+- HTTP status and the complete observed redirect chain
+- canonical and HTML/HTTP robots directives
+- effective `robots.txt` result for Googlebot
+- sitemap membership (`Yes`, `No`, or `Unknown—incomplete`)
+- JSON-LD block count, validity, `@type` inventory, and duplicate `@id` values
+- old/staging-domain evidence with the exact value, snippet, and source context
+- evidence completeness (`Complete`, `Partial`, or `Failed`)
 
-Tested with WordPress 7.0 and PHP 8.4 during local verification.
+CSV export is available when a scan completes.
 
-## CI
+## Evidence policy
 
-GitHub Actions lint the plugin and run redirect/response-boundary behavioral tests across PHP 7.4 through 8.4. Activation smoke tests run against WordPress 6.0 on PHP 7.4 plus the latest WordPress release on PHP 8.3 and 8.4.
+Results are intentionally conservative:
 
-## Data handling
+- a failed `robots.txt`, sitemap, or page fetch is `Unknown`, never positive evidence;
+- `robots.txt` evaluation selects crawler-specific groups for Googlebot and applies longest-match `Allow`/`Disallow` behavior, with `Allow` winning equal-length ties;
+- a missing sitemap entry is `No` only when all bounded sitemap evidence completed;
+- truncated responses do not produce absence claims;
+- JSON-LD is decoded from the raw script body without HTML entity decoding;
+- ordinary words such as “staging” in page copy are ignored;
+- migration evidence is limited to properly formed hosts in `href`, `src`, canonical/Open Graph URL fields, CSS `url(...)`, and JSON-LD URL values.
 
-This tool checks same-site URLs selected or entered by the administrator. Results are generated for the current run and can be exported as CSV.
+## Batching and safety
 
-## Limits
+Sitemap discovery and page inspection run through nonce-protected wp-admin AJAX batches. Job state is stored in a per-user transient for one hour, and the browser resumes the active job after a page reload.
 
-This is a quick diagnostic helper, not a replacement for Google Search Console, Screaming Frog, Sitebulb, server logs, or a full technical SEO audit.
+Safety boundaries include:
 
-Result labels are conservative. The plugin reports evidence from crawler-facing HTTP and HTML responses; it does not claim ranking impact and does not auto-fix anything.
+- same-site fetches only
+- WordPress safe HTTP requests
+- manual redirect tracking with a five-hop limit
+- external redirect destinations recorded but not fetched
+- response bodies limited to 2 MB
+- up to 25 sitemap files and 25,000 membership URLs
+- up to 50 page targets per scan
 
 ## Installation
 
-1. Copy the `indexlane-crawl-fetch-inspector` folder into `wp-content/plugins/`.
-2. Activate "IndexLane Crawl Fetch Inspector" in WordPress admin.
-3. Open Tools -> Crawl Fetch Inspector.
-4. Enter URLs or select recent content, then run checks.
+1. Copy `indexlane-crawl-fetch-inspector` into `wp-content/plugins/`.
+2. Activate **IndexLane Crawl Fetch Inspector**.
+3. Open **Tools → Crawl Fetch Inspector**.
+4. Choose an input mode and start an inspection.
 
-## v0.1 Scope
+## Development and verification
 
-Included:
+Run the behavioral suite:
 
-- Admin-only access using `manage_options`
-- Nonce-protected form actions
-- Same-site WordPress URL checks only
-- External manual URLs skipped
-- Same-site redirects that leave the site are not followed
-- Safe WordPress HTTP requests with manual redirect tracking
-- Response bodies bounded to 2 MB, with incomplete evidence reported
-- Sanitized input and escaped output
-- CSV formula-injection protection
-- Read-only diagnostics
-- No scheduled jobs
-- No database storage
-- CSV export
+```sh
+php tests/behavioral.php
+```
 
-Not included:
+GitHub Actions lint PHP 7.4 through 8.4, run the behavioral fixtures, and smoke-test activation against the oldest supported and current WordPress/PHP combinations.
 
-- Auto-fixes
-- Google Search Console integration
-- Rank tracking
-- Scheduled scans
-- External URL fetching
-- Stored scan history
-
-## Repository Layout
+## Repository layout
 
 ```text
 indexlane-crawl-fetch-inspector/
-  .github/workflows/
-    php-compatibility.yml
-    wordpress-activation.yml
   indexlane-crawl-fetch-inspector.php
-  readme.txt
-  README.md
+  includes/
+    class-ilcfi-fetch-client.php
+    class-ilcfi-redirect-follower.php
+    class-ilcfi-html-parser.php
+    class-ilcfi-robots-evaluator.php
+    class-ilcfi-sitemap-service.php
+    class-ilcfi-evidence-evaluator.php
+    class-ilcfi-target-collector.php
+    class-ilcfi-report-builder.php
+    class-ilcfi-csv-exporter.php
+    class-ilcfi-url-helper.php
   assets/
-    screenshot-1.png
-    screenshot-2.png
-    demo.gif
-  docs/
-    sample-report.csv
-    changelog.md
+    admin.css
+    admin.js
   tests/
     behavioral.php
+    fixtures/
 ```
+
+The plugin does not auto-fix pages, fetch external redirect targets, call external APIs, claim indexation, or replace Search Console, server logs, or a full crawler.
+
+Licensed under GPL-2.0-or-later. See [LICENSE](LICENSE).

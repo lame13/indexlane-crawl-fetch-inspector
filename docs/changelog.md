@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0
+
+- Rebuilt the original monolith as focused URL, fetch, redirect, HTML/JSON-LD parsing, robots, sitemap, evaluation, target collection, report, and CSV export services.
+- Added manual/recent, sitemap sample, and launch/migration input modes.
+- Added crawler-specific Googlebot group selection with combined equally specific groups and longest-match `Allow`/`Disallow` evaluation.
+- Made missing robots evidence `Unknown` and used “Crawl blocked” only for an effective robots.txt block.
+- Added automatic bounded sitemap-index expansion, distributed sampling across child sitemaps, and transient-backed resumable AJAX batches.
+- Added `Yes`, `No`, and `Unknown—incomplete` sitemap membership, where `No` requires complete bounded evidence.
+- Added raw JSON-LD block validation, `@type` inventory, and duplicate `@id` detection without pre-decode HTML entity conversion.
+- Added administrator-supplied old domains and exact URL-context evidence from `href`, `src`, canonical/Open Graph URLs, inline CSS, and JSON-LD URL properties.
+- Added `Complete`, `Partial`, and `Failed` evidence states and expanded CSV output.
+- Added fixtures covering redirects, truncation, crawler-specific robots precedence, child sitemap sampling, partial membership evidence, JSON-LD, and migration residue.
+- Added a repository-root GPL-2.0-or-later license, project link, and GitHub release notes.
+
 ## 0.1.2
 
 - Fixed ordinary trailing-slash and canonical-host redirects being reported as loops, while preserving genuine loop detection.

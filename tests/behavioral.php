@@ -29,6 +29,10 @@ function __( $text ) {
 	return $text;
 }
 
+function _n( $single, $plural, $number ) {
+	return 1 === (int) $number ? $single : $plural;
+}
+
 function home_url( $path = '/' ) {
 	return 'https://example.test/' . ltrim( $path, '/' );
 }
@@ -160,6 +164,12 @@ $tests = array(
 
 		ilcfi_assert_true( $without !== $with, 'Trailing-slash variants must not be deduplicated.' );
 	},
+	'same-site URL policy rejects unexpected service ports' => function () {
+		$urls = new ILCFI_URL_Helper();
+
+		ilcfi_assert_same( true, $urls->is_same_site( 'http://example.test/page/' ), 'The ordinary HTTP port should remain available for HTTP-to-HTTPS checks.' );
+		ilcfi_assert_same( false, $urls->is_same_site( 'https://example.test:3306/page/' ), 'An unrelated port on the site hostname must not enter the HTTP fetch scope.' );
+	},
 	'www canonical-host redirects reach the destination' => function () {
 		$plugin = new IndexLane_Crawl_Fetch_Inspector();
 
@@ -252,6 +262,7 @@ $tests = array(
 		ilcfi_assert_same( 'Not checked', $row['title'], 'Incomplete HTML must not produce absence claims.' );
 		ilcfi_assert_same( 'Not checked', $row['json_ld_count'], 'Incomplete HTML must not claim that no JSON-LD was found.' );
 		ilcfi_assert_same( 'Not checked', $row['dev_residue'], 'Incomplete HTML must not claim that no dev residue was found.' );
+		ilcfi_assert_contains( 'Unknown—not checked', $row['robots_directives'], 'Incomplete HTML must not claim that no HTML robots directive was found.' );
 		ilcfi_assert_contains( '2 MB safety limit', $row['detail'], 'The response bound should be visible to the user.' );
 	},
 	'unencoded short bodies are checked against Content-Length' => function () {
@@ -290,6 +301,189 @@ $tests = array(
 		$fetch = ilcfi_invoke( $plugin, 'fetch_url', array( 'https://example.test/compressed' ) );
 
 		ilcfi_assert_same( false, $fetch['body_truncated'], 'Compressed wire length must not be compared with a decompressed body.' );
+	},
+	'Googlebot-specific robots groups override wildcard groups' => function () {
+		$urls       = new ILCFI_URL_Helper();
+		$client     = new ILCFI_Fetch_Client( 'test', IndexLane_Crawl_Fetch_Inspector::MAX_RESPONSE_BYTES );
+		$redirects  = new ILCFI_Redirect_Follower( $client, $urls, IndexLane_Crawl_Fetch_Inspector::MAX_REDIRECTS );
+		$robots     = new ILCFI_Robots_Evaluator( $redirects, $urls );
+		$groups     = $robots->parse( file_get_contents( __DIR__ . '/fixtures/robots-googlebot.txt' ) );
+		$context    = array( 'status' => 'ok', 'groups' => $groups );
+		$ordinary   = $robots->evaluate_googlebot( 'https://example.test/ordinary/', $context );
+		$private    = $robots->evaluate_googlebot( 'https://example.test/private/file/', $context );
+		$public     = $robots->evaluate_googlebot( 'https://example.test/private/public/item/', $context );
+		$reports    = $robots->evaluate_googlebot( 'https://example.test/private/public/reports/today/', $context );
+
+		ilcfi_assert_same( 'Allowed', $ordinary['state'], 'A specific Googlebot group must take precedence over the wildcard group.' );
+		ilcfi_assert_same( 'Crawl blocked', $private['state'], 'The matching Googlebot disallow must be reported as a crawl block.' );
+		ilcfi_assert_same( 'Allowed', $public['state'], 'The longer Allow rule must win.' );
+		ilcfi_assert_same( 'Crawl blocked', $reports['state'], 'An even longer Disallow rule must win for its subtree.' );
+		ilcfi_assert_same( 'googlebot', $private['agent'], 'The effective crawler-specific group should be reported.' );
+	},
+	'robots fetch failures remain Unknown' => function () {
+		$urls       = new ILCFI_URL_Helper();
+		$client     = new ILCFI_Fetch_Client( 'test', IndexLane_Crawl_Fetch_Inspector::MAX_RESPONSE_BYTES );
+		$redirects  = new ILCFI_Redirect_Follower( $client, $urls, IndexLane_Crawl_Fetch_Inspector::MAX_REDIRECTS );
+		$robots     = new ILCFI_Robots_Evaluator( $redirects, $urls );
+
+		ilcfi_queue_responses( array() );
+		$context = $robots->get_context( 'https://example.test/page/' );
+		$result  = $robots->evaluate_googlebot( 'https://example.test/page/', $context );
+
+		ilcfi_assert_same( 'Unknown', $result['state'], 'A robots.txt fetch failure must never be treated as allowed or OK.' );
+		ilcfi_assert_same( false, $result['complete'], 'Failed robots evidence must be incomplete.' );
+	},
+	'crawler-targeted HTML and HTTP robots directives do not leak across agents' => function () {
+		$parser    = new ILCFI_HTML_Parser( new ILCFI_URL_Helper() );
+		$evaluator = new ILCFI_Evidence_Evaluator();
+		$analysis  = $parser->analyze(
+			'<html><head><meta name="robots" content="index,follow"><meta name="googlebot-news" content="noindex"></head><body></body></html>',
+			'https://example.test/news/'
+		);
+
+		ilcfi_assert_same( 'robots: index,follow', $analysis['effective_meta_robots'], 'Googlebot-News directives must not be applied to general Googlebot.' );
+		ilcfi_assert_same( false, $evaluator->has_noindex( $analysis['effective_meta_robots'], 'otherbot: noindex' ), 'Another crawler\'s X-Robots-Tag must not block Googlebot.' );
+		ilcfi_assert_same( true, $evaluator->has_noindex( $analysis['effective_meta_robots'], 'googlebot: noindex' ), 'A Googlebot-targeted X-Robots-Tag must apply.' );
+	},
+	'sitemap indexes expand and samples alternate across children' => function () {
+		$urls       = new ILCFI_URL_Helper();
+		$client     = new ILCFI_Fetch_Client( 'test', IndexLane_Crawl_Fetch_Inspector::MAX_RESPONSE_BYTES );
+		$redirects  = new ILCFI_Redirect_Follower( $client, $urls, IndexLane_Crawl_Fetch_Inspector::MAX_REDIRECTS );
+		$sitemaps   = new ILCFI_Sitemap_Service( $redirects, $urls );
+
+		ilcfi_queue_responses(
+			array(
+				'https://example.test/sitemap.xml' => array( ilcfi_response( 200, array( 'Content-Type' => 'application/xml' ), file_get_contents( __DIR__ . '/fixtures/sitemap-index.xml' ) ) ),
+				'https://example.test/posts-sitemap.xml' => array( ilcfi_response( 200, array( 'Content-Type' => 'application/xml' ), file_get_contents( __DIR__ . '/fixtures/posts-sitemap.xml' ) ) ),
+				'https://example.test/pages-sitemap.xml' => array( ilcfi_response( 200, array( 'Content-Type' => 'application/xml' ), file_get_contents( __DIR__ . '/fixtures/pages-sitemap.xml' ) ) ),
+			)
+		);
+
+		$state = $sitemaps->create_state( 'https://example.test/sitemap.xml', 4 );
+		while ( 'discovering' === $state['status'] ) {
+			$state = $sitemaps->process_batch( $state, 1 );
+		}
+
+		ilcfi_assert_same( 3, $state['files_checked'], 'The index and both child sitemaps should be expanded automatically.' );
+		ilcfi_assert_same( 'complete', $state['completeness'], 'All sitemap evidence should be complete.' );
+		ilcfi_assert_same(
+			array(
+				'https://example.test/post-one/',
+				'https://example.test/about/',
+				'https://example.test/post-two/',
+				'https://example.test/contact/',
+			),
+			$state['sample_targets'],
+			'The sample should round-robin across child sitemaps.'
+		);
+		ilcfi_assert_same( 'Yes', $sitemaps->membership( 'https://example.test/privacy/', $state ), 'An observed URL should have Yes membership.' );
+		ilcfi_assert_same( 'No', $sitemaps->membership( 'https://example.test/missing/', $state ), 'A complete sitemap set can support a No membership result.' );
+	},
+	'incomplete child sitemap evidence never produces No membership' => function () {
+		$urls       = new ILCFI_URL_Helper();
+		$client     = new ILCFI_Fetch_Client( 'test', IndexLane_Crawl_Fetch_Inspector::MAX_RESPONSE_BYTES );
+		$redirects  = new ILCFI_Redirect_Follower( $client, $urls, IndexLane_Crawl_Fetch_Inspector::MAX_REDIRECTS );
+		$sitemaps   = new ILCFI_Sitemap_Service( $redirects, $urls );
+
+		ilcfi_queue_responses(
+			array(
+				'https://example.test/sitemap.xml' => array( ilcfi_response( 200, array(), file_get_contents( __DIR__ . '/fixtures/sitemap-index.xml' ) ) ),
+				'https://example.test/posts-sitemap.xml' => array( ilcfi_response( 200, array(), file_get_contents( __DIR__ . '/fixtures/posts-sitemap.xml' ) ) ),
+			)
+		);
+
+		$state = $sitemaps->create_state( 'https://example.test/sitemap.xml', 4 );
+		while ( 'discovering' === $state['status'] ) {
+			$state = $sitemaps->process_batch( $state, 3 );
+		}
+
+		ilcfi_assert_same( 'partial', $state['completeness'], 'A failed child must make the sitemap manifest partial.' );
+		ilcfi_assert_same( 'Yes', $sitemaps->membership( 'https://example.test/post-one/', $state ), 'Positive observed membership remains usable.' );
+		ilcfi_assert_same( 'Unknown—incomplete', $sitemaps->membership( 'https://example.test/unseen/', $state ), 'Missing membership must remain Unknown when any child evidence failed.' );
+	},
+	'JSON-LD and migration evidence preserve exact URL contexts' => function () {
+		$parser   = new ILCFI_HTML_Parser( new ILCFI_URL_Helper() );
+		$analysis = $parser->analyze(
+			file_get_contents( __DIR__ . '/fixtures/schema-migration-evidence.html' ),
+			'https://example.test/product/',
+			array( 'old.example' )
+		);
+
+		ilcfi_assert_same( 2, $analysis['json_ld_count'], 'Both JSON-LD blocks should be counted.' );
+		ilcfi_assert_same( 1, $analysis['json_ld_malformed'], 'HTML entity decoding must not make the malformed block valid.' );
+		ilcfi_assert_same( array( 'Offer', 'Product', 'Thing' ), $analysis['json_ld_types'], 'All unique @type values should be inventoried without duplicate-type warnings.' );
+		ilcfi_assert_same( array( 'https://old.example/#product' ), $analysis['duplicate_json_ld_ids'], 'Duplicate @id values should be detected.' );
+
+		$contexts = array();
+		$values   = array();
+		foreach ( $analysis['residue_evidence'] as $evidence ) {
+			$contexts[] = $evidence['context'];
+			$values[]   = $evidence['matched_value'];
+		}
+
+		ilcfi_assert_true( in_array( 'canonical[href]', $contexts, true ), 'Canonical URL context should be preserved.' );
+		ilcfi_assert_true( in_array( 'meta[og:url]', $contexts, true ), 'Open Graph URL context should be preserved.' );
+		ilcfi_assert_true( in_array( 'style element url()', $contexts, true ), 'Inline CSS URL context should be preserved.' );
+		ilcfi_assert_true( in_array( 'a[href]', $contexts, true ), 'href evidence should be preserved.' );
+		ilcfi_assert_true( in_array( 'https://old.example/support/', $values, true ), 'The exact matched old-domain value should be preserved.' );
+		ilcfi_assert_true( false === strpos( implode( ' ', $values ), 'ordinary page copy' ), 'Generic staging words in page copy must not be scanned as evidence.' );
+	},
+	'page fetch failures produce Failed evidence and an Unknown result' => function () {
+		$plugin = new IndexLane_Crawl_Fetch_Inspector();
+		ilcfi_queue_responses( array() );
+
+		$row = ilcfi_invoke( $plugin, 'inspect_url', array( 'https://example.test/failure/', 'https://example.test/failure/' ) );
+
+		ilcfi_assert_same( 'Unknown', $row['result'], 'A page fetch failure must never be classified as OK.' );
+		ilcfi_assert_same( 'Failed', $row['evidence_completeness'], 'No page response means evidence failed.' );
+	},
+	'assembled reports expose every requested evidence section' => function () {
+		$urls       = new ILCFI_URL_Helper();
+		$client     = new ILCFI_Fetch_Client( 'test', IndexLane_Crawl_Fetch_Inspector::MAX_RESPONSE_BYTES );
+		$redirects  = new ILCFI_Redirect_Follower( $client, $urls, IndexLane_Crawl_Fetch_Inspector::MAX_REDIRECTS );
+		$robots     = new ILCFI_Robots_Evaluator( $redirects, $urls );
+		$sitemaps   = new ILCFI_Sitemap_Service( $redirects, $urls );
+		$reports    = new ILCFI_Report_Builder( $redirects, new ILCFI_HTML_Parser( $urls ), $robots, $sitemaps, new ILCFI_Evidence_Evaluator(), $client, $urls );
+		$page_url   = 'https://example.test/product/';
+		$robots_context = array(
+			'status' => 'ok',
+			'groups' => $robots->parse( file_get_contents( __DIR__ . '/fixtures/robots-googlebot.txt' ) ),
+		);
+		$sitemap_state = array(
+			'checked'      => true,
+			'status'       => 'ready',
+			'completeness' => 'complete',
+			'urls'         => array( $urls->normalize_for_compare( $page_url ) => true ),
+		);
+
+		ilcfi_queue_responses(
+			array(
+				$page_url => array(
+					ilcfi_response( 200, array( 'Content-Type' => 'text/html', 'X-Robots-Tag' => 'index, follow' ), file_get_contents( __DIR__ . '/fixtures/schema-migration-evidence.html' ) ),
+				),
+			)
+		);
+
+		$row = $reports->inspect(
+			$page_url,
+			$page_url,
+			array(
+				'old_domains'    => array( 'old.example' ),
+				'robots_context' => $robots_context,
+				'sitemap_state'  => $sitemap_state,
+			)
+		);
+
+		ilcfi_assert_same( '200', $row['http_status'], 'HTTP evidence should be present.' );
+		ilcfi_assert_contains( '[200]', $row['redirect_chain'], 'The observed chain should include the terminal response.' );
+		ilcfi_assert_contains( 'staging.example.net', $row['canonical_url'], 'Canonical evidence should be present.' );
+		ilcfi_assert_contains( 'Allowed', $row['robots_txt'], 'Effective Googlebot robots evidence should be present.' );
+		ilcfi_assert_same( 'Yes', $row['sitemap_membership'], 'Sitemap membership should be present.' );
+		ilcfi_assert_same( '1 malformed of 2 blocks', $row['json_ld_validity'], 'JSON-LD validity should be present.' );
+		ilcfi_assert_contains( 'Product', $row['json_ld_types'], 'JSON-LD type inventory should be present.' );
+		ilcfi_assert_contains( 'old.example', $row['old_domain_evidence'], 'Migration evidence should be present.' );
+		ilcfi_assert_same( 'Complete', $row['evidence_completeness'], 'Complete evidence can still contain review findings.' );
+		ilcfi_assert_same( 'Needs review', $row['result'], 'Canonical, malformed schema, and migration findings should require review.' );
 	},
 );
 

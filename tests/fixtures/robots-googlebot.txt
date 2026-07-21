@@ -1,0 +1,10 @@
+User-agent: *
+Disallow: /
+
+User-agent: Googlebot
+Disallow: /private/
+Allow: /private/public/
+Disallow: /private/public/reports/
+
+User-agent: Googlebot-News
+Disallow: /news-preview/
